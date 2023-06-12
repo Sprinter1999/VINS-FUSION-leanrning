@@ -115,7 +115,7 @@ void sync_process()
             if(!image0.empty())
                 estimator.inputImage(time, image0, image1);
         }
-        else
+        else //我们考虑单目的情况
         {
             cv::Mat image;
             std_msgs::Header header;
@@ -138,7 +138,7 @@ void sync_process()
     }
 }
 
-// 输入imu的msg信息，进行解算并把imu数据输入到estimator
+// 输入imu的msg信息，进行解算并把imu数据输入到estimator，这时还是6Dof+时间戳的IMU信息
 void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
 {
     double t = imu_msg->header.stamp.toSec();//讲头文件中的时间戳转换为s
@@ -149,25 +149,30 @@ void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
     double ry = imu_msg->angular_velocity.y;
     double rz = imu_msg->angular_velocity.z;
     Vector3d acc(dx, dy, dz);
+    //陀螺仪是一种测量角速度的传感器，常用于自动驾驶系统中的惯性测量单元IMU中。
+    //IMU通常由多个传感器组成，包括加速度计、陀螺仪和磁力计等，以提供关于车辆运动状态的信息。
     Vector3d gyr(rx, ry, rz);
     estimator.inputIMU(t, acc, gyr);
     return;
 }
 
-// 把特征点的点云msg输入到estimator
+// 收到点云的feature进行处理的回调，把特征点的点云msg输入到estimator
 void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
 {
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     // 数据格式为feature_id camera_id xyz_uv_velocity
 
-    // 把电云中所有的点
+    // 把点云中所有的点
+    // 该特征点在3D世界坐标系中的位置（x, y, z）、在相机坐标系中的归一化像素坐标（p_u, p_v）和在相机坐标系中的速度（velocity_x, velocity_y）
     for (unsigned int i = 0; i < feature_msg->points.size(); i++)
     {
         int feature_id = feature_msg->channels[0].values[i];
         int camera_id = feature_msg->channels[1].values[i];
+        //FIXME: 这里的xyz是在什么坐标系下的
         double x = feature_msg->points[i].x;
         double y = feature_msg->points[i].y;
         double z = feature_msg->points[i].z;
+        //FIXME:uv是指？
         double p_u = feature_msg->channels[2].values[i];
         double p_v = feature_msg->channels[3].values[i];
         double velocity_x = feature_msg->channels[4].values[i]; //特征点的像素速度
@@ -177,7 +182,7 @@ void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
             double gx = feature_msg->channels[6].values[i];
             double gy = feature_msg->channels[7].values[i];
             double gz = feature_msg->channels[8].values[i];
-            pts_gt[feature_id] = Eigen::Vector3d(gx, gy, gz); //FIXME: 这个gt是什么玩意儿？ 这个具体得看发布时是什么样子的
+            pts_gt[feature_id] = Eigen::Vector3d(gx, gy, gz); //FIXME: 这个gt是什么？ 这个具体得看发布时是什么样子的
             //printf("receive pts gt %d %f %f %f\n", feature_id, gx, gy, gz);
         }
         ROS_ASSERT(z == 1);//FIXME: 

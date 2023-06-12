@@ -68,13 +68,21 @@ class Estimator
     bool failureDetection();
     bool getIMUInterval(double t0, double t1, vector<pair<double, Eigen::Vector3d>> &accVector, 
                                               vector<pair<double, Eigen::Vector3d>> &gyrVector);
+
+
+    //TODO: 可以获取的位姿，后续计算车位的世界坐标应该可以用上
     void getPoseInWorldFrame(Eigen::Matrix4d &T);
+
+    //TODO: 这个index是指？
     void getPoseInWorldFrame(int index, Eigen::Matrix4d &T);
     void predictPtsInNextFrame();
     void outliersRejection(set<int> &removeIndex);
+
+    //重投影误差
     double reprojectionError(Matrix3d &Ri, Vector3d &Pi, Matrix3d &rici, Vector3d &tici,
                                      Matrix3d &Rj, Vector3d &Pj, Matrix3d &ricj, Vector3d &ticj, 
                                      double depth, Vector3d &uvi, Vector3d &uvj);
+
     void updateLatestStates();
     void fastPredictIMU(double t, Eigen::Vector3d linear_acceleration, Eigen::Vector3d angular_velocity);
     bool IMUAvailable(double t);
@@ -114,6 +122,8 @@ class Estimator
     Matrix3d ric[2];
     Vector3d tic[2];
 
+
+    //TODO:滑动窗口需要维护哪些信息
     Vector3d        Ps[(WINDOW_SIZE + 1)];//划窗内所有的p
     Vector3d        Vs[(WINDOW_SIZE + 1)];//划窗内所有的速度
     Matrix3d        Rs[(WINDOW_SIZE + 1)];//划窗内所有的R
@@ -136,6 +146,8 @@ class Estimator
     int sum_of_outlier, sum_of_back, sum_of_front, sum_of_invalid;
     int inputImageCnt; //一共输入了多少图片
 
+
+    //TODO: 车位管理是否也需要进行这种特征点的管理对象？
     FeatureManager f_manager;//FIXME:定义一个管理特征点的对象
     MotionEstimator m_estimator;//定义一个运动估计的对象
     InitialEXRotation initial_ex_rotation;//定义一个估计外部参数校准的对象

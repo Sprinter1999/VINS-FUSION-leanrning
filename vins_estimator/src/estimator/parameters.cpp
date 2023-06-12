@@ -21,8 +21,12 @@ Eigen::Vector3d G{0.0, 0.0, 9.8};
 
 double BIAS_ACC_THRESHOLD; //acc偏执的阈值？
 double BIAS_GYR_THRESHOLD;
+
+//优化器配置选项
 double SOLVER_TIME; //max solver itration time (ms), to guarantee real time 最大求解器迭代时间（毫秒），以确保实时
 int NUM_ITERATIONS; //max solver itrations, to guarantee real time
+
+
 int ESTIMATE_EXTRINSIC; // 外部参数校准开关
 int ESTIMATE_TD; // 校准时间的开关
 int ROLLING_SHUTTER; // 这个并没有赋值！！
@@ -40,6 +44,9 @@ map<int, Eigen::Vector3d> pts_gt; // 这个也没有赋值
 std::string IMAGE0_TOPIC, IMAGE1_TOPIC;
 std::string FISHEYE_MASK; // 这个并没有赋值！！
 std::vector<std::string> CAM_NAMES;
+
+
+//Visual Odometry Options
 int MAX_CNT; //max feature number in feature tracking
 int MIN_DIST; //min distance between two features 
 double F_THRESHOLD; // ransac threshold (pixel)
