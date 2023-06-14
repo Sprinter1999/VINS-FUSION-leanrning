@@ -46,7 +46,7 @@ std::string FISHEYE_MASK; // 这个并没有赋值！！
 std::vector<std::string> CAM_NAMES;
 
 
-//Visual Odometry Options
+//前端光流跟踪选项 Visual Odometry Options
 int MAX_CNT; //max feature number in feature tracking
 int MIN_DIST; //min distance between two features 
 double F_THRESHOLD; // ransac threshold (pixel)

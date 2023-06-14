@@ -119,6 +119,7 @@ class Estimator
     MarginalizationFlag  marginalization_flag;
     Vector3d g;
 
+    //FIXME:还没理解这两个三维向量是指什么
     Matrix3d ric[2];
     Vector3d tic[2];
 

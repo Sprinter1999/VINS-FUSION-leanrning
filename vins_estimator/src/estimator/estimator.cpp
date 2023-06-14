@@ -10,6 +10,7 @@
 #include "estimator.h"
 #include "../utility/visualization.h"
 
+//管理特征点的对象
 Estimator::Estimator(): f_manager{Rs}
 {
     ROS_INFO("init begins");
@@ -17,6 +18,7 @@ Estimator::Estimator(): f_manager{Rs}
     clearState();
 }
 
+//析构函数，如果定义了多个线程，该函数会等待所有线程结束后再释放资源
 Estimator::~Estimator()
 {
     if (MULTIPLE_THREAD)
@@ -96,8 +98,8 @@ void Estimator::clearState()
 // 设置参数，并开启processMeasurements线程
 void Estimator::setParameter()
 {
-    mProcess.lock();//涉及到多线程，暂时不了解
-    // 讲相机参数传入
+    mProcess.lock();//涉及到多线程协同管理资源
+    // 将各个相机参数传入
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         tic[i] = TIC[i];
@@ -109,16 +111,19 @@ void Estimator::setParameter()
     ProjectionTwoFrameOneCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
     ProjectionTwoFrameTwoCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
     ProjectionOneFrameTwoCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
+
     td = TD;//时间的误差量
     g = G;//理想的中立加速度
+
     cout << "set g " << g.transpose() << endl;
-    // 将相机参数传入到特征跟踪的类里  set g 0 0 9.81007
+    // 将相机内参传入到特征跟踪的类里  set g 0 0 9.81007
     featureTracker.readIntrinsicParameter(CAM_NAMES);//读取相机的内部参数，CAM_NAMES是相机参数的路径
 
     std::cout << "MULTIPLE_THREAD is " << MULTIPLE_THREAD << '\n';
         //MULTIPLE_THREAD is 1
+
     if (MULTIPLE_THREAD && !initThreadFlag)
-    // 如果是单线程，且线程没有chuli则开启开启了一个Estimator类内的新线程：processMeasurements();
+    // 如果是单线程，且线程没有处理则开启开启了一个Estimator类内的新线程：processMeasurements();
     {
         initThreadFlag = true;
         //申明并定义一个 处理 的线程 但是没有运行？？
@@ -127,6 +132,7 @@ void Estimator::setParameter()
     mProcess.unlock();
 }
 
+// 不重要
 void Estimator::changeSensorType(int use_imu, int use_stereo)
 {
     bool restart = false;
@@ -166,18 +172,18 @@ void Estimator::changeSensorType(int use_imu, int use_stereo)
 }
 
 // 给Estimator输入图像
-// 其实是给featureTracker.trackImage输入图像，之后返回图像特征featureFrame。填充featureBuf
+// 其实是给featureTracker.trackImage输入图像，之后返回图像特征featureFrame。填充 featureBuf
 // 之后执行processMeasurements
 void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
 {        
     setParameter();
 
-    inputImageCnt++;//、
+    inputImageCnt++;//
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     // 数据格式为feature_id camera_id（0或1） xyz_uv_velocity（空间坐标，像素坐标和像素速度）
 
     TicToc featureTrackerTime;
-    // 特征追踪所用的时间 这个很好用啊！！
+    // 记录特征追踪所用时间
 
     if(_img1.empty())
         featureFrame = featureTracker.trackImage(t, _img);// 追踪单目
@@ -191,7 +197,7 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
         pubTrackImage(imgTrack, t);
     }
     
-    if(MULTIPLE_THREAD) //FIXME: 多线程的处理还是很迷糊 
+    if(MULTIPLE_THREAD) //线程资源管理，虽然没完全理解，不过也不是最主要的部分
     {     
         if(inputImageCnt % 2 == 0)
         {
@@ -216,6 +222,7 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
 // 填充了accBuf和gyrBuf
 void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vector3d &angularVelocity)
 {
+    //顺序读写加入的imu和gyr数据
     mBuf.lock();
     accBuf.push(make_pair(t, linearAcceleration));
     gyrBuf.push(make_pair(t, angularVelocity));
@@ -227,6 +234,7 @@ void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vec
     {
         mPropagate.lock();
         fastPredictIMU(t, linearAcceleration, angularVelocity);
+        //latest_X是上一个时刻的各个值
         pubLatestOdometry(latest_P, latest_Q, latest_V, t);
         mPropagate.unlock();
     }
@@ -239,6 +247,7 @@ void Estimator::inputFeature(double t, const map<int, vector<pair<int, Eigen::Ma
     featureBuf.push(make_pair(t, featureFrame));
     mBuf.unlock();
 
+    //FIXME:其实这里的MULTIPLE_THREAD我也没搞懂他的主要功能
     if(!MULTIPLE_THREAD)
         processMeasurements();
 }
@@ -292,14 +301,14 @@ bool Estimator::IMUAvailable(double t)
         return false;
 }
 
-//处理量测的线程
+//FIXME: 处理量测的线程, 没完全理解
 void Estimator::processMeasurements()
 {
     while (1)
     {
         //printf("process measurments\n");
         pair<double, map<int, vector<pair<int, Eigen::Matrix<double, 7, 1> > > > > feature;
-        // 时间 特征点ID 图像id xyz_uv_vel
+        //  时间戳、    特征点ID、      图像ID、           xyz_uv_vel
         vector<pair<double, Eigen::Vector3d>> accVector, gyrVector;
         //处理特征点的buf
         if(!featureBuf.empty())
@@ -327,7 +336,7 @@ void Estimator::processMeasurements()
             featureBuf.pop();//每次运行完之后都删除featureBuf中的元素，直到为空，已经把要删除的这个值给了feature
             mBuf.unlock();
 
-            // 处理imu数据，运行processIMU
+            // 处理imu数据，运行 processIMU
             if(USE_IMU)
             {
                 if(!initFirstPoseFlag)
@@ -460,7 +469,7 @@ void Estimator::processImage
     ROS_DEBUG("new image coming ------------------------------------------");//输入进来的其实只有特征点
     ROS_DEBUG("Adding feature points %lu", image.size());
 
-    // 检测关键帧
+    // 检测关键帧，检查视差确定要边缘化滑窗内的哪一帧
     if (f_manager.addFeatureCheckParallax(frame_count, image, td))
     {
         marginalization_flag = MARGIN_OLD;//新一阵将被作为关键帧!
@@ -521,6 +530,7 @@ void Estimator::processImage
                 }
                 if(result)//如果初始化成功
                 {
+                    //TODO:后端优化首次被调用
                     optimization();//先进行一次滑动窗口非线性优化，得到当前帧与第一帧的位姿
                     updateLatestStates();
                     solver_flag = NON_LINEAR;
@@ -584,7 +594,7 @@ void Estimator::processImage
             }
         }
         
-        // 如果划窗内的没有算法,进行状态更新
+        // 如果划窗内的没,进行状态更新
         if(frame_count < WINDOW_SIZE)
         {
             frame_count++;
@@ -605,6 +615,8 @@ void Estimator::processImage
         if(!USE_IMU)
             f_manager.initFramePoseByPnP(frame_count, Ps, Rs, tic, ric);//直接对下一帧求解位姿
         f_manager.triangulate(frame_count, Ps, Rs, tic, ric);
+
+        //TODO:已经初始化后的调用后端优化
         optimization();
         set<int> removeIndex;
         outliersRejection(removeIndex);
@@ -646,9 +658,9 @@ void Estimator::processImage
     }  
 }
 
-/* 视觉的结构初始化
+/* 视觉的结构初始化 SfM
 首先得到纯视觉的,所有图像在IMU坐标系下的,一个初始化结果,也就是RT
-然后进行视觉imu对其,陀螺仪偏执估计等等
+然后进行视觉imu对齐,陀螺仪偏置bias估计等等
 其中包含 */
 bool Estimator::initialStructure()
 {
@@ -838,7 +850,7 @@ bool Estimator::initialStructure()
 
 }
 
-// 视觉和惯性的对其,对应https://mp.weixin.qq.com/s/9twYJMOE8oydAzqND0UmFw中的visualInitialAlign
+// 视觉和惯性的对齐,对应https://mp.weixin.qq.com/s/9twYJMOE8oydAzqND0UmFw中的visualInitialAlign
 /* visualInitialAlign
 很具VIO课程第七讲:一共分为5步:
 1估计旋转外参. 2估计陀螺仪bias 3估计中立方向,速度.尺度初始值 4对重力加速度进一步优化 5将轨迹对其到世界坐标系 */
@@ -944,6 +956,8 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
     return false;
 }
 
+
+//TODO: 这个函数很重要，我们后面大概会用到
 // vector转换成double数组，因为ceres使用数值数组
 /*可以看出来，这里面生成的优化变量由：
 para_Pose（7维，相机位姿）、
@@ -952,6 +966,8 @@ para_Ex_Pose（6维、相机IMU外参）、
 para_Feature（1维，特征点深度）、
 para_Td（1维，标定同步时间）
 五部分组成，在后面进行边缘化操作时这些优化变量都是当做整体看待。*/
+
+//TODO:后端优化是针对滑动窗口内的Pose和Feature进行联合优化，所以在划窗内的相关变量需要转化为double数组，这里的转化是为了ceres优化库使用
 void Estimator::vector2double()
 {
     for (int i = 0; i <= WINDOW_SIZE; i++)
@@ -959,6 +975,7 @@ void Estimator::vector2double()
         para_Pose[i][0] = Ps[i].x();
         para_Pose[i][1] = Ps[i].y();
         para_Pose[i][2] = Ps[i].z();
+
         Quaterniond q{Rs[i]};
         para_Pose[i][3] = q.x();
         para_Pose[i][4] = q.y();
@@ -1149,31 +1166,35 @@ void Estimator::optimization()
 
     //------------------ 定义问题 定义本地参数化,并添加优化参数-------------------------------------------------
     ceres::Problem problem;// 定义ceres的优化问题
-    ceres::LossFunction *loss_function;//核函数
+    ceres::LossFunction *loss_function;//核函数,主要是避免一些异常值对于优化的干扰
     //loss_function = NULL;
     loss_function = new ceres::HuberLoss(1.0);//HuberLoss当预测偏差小于 δ 时，它采用平方误差,当预测偏差大于 δ 时，采用的线性误差。
     //loss_function = new ceres::CauchyLoss(1.0 / FOCAL_LENGTH);
     //ceres::LossFunction* loss_function = new ceres::HuberLoss(1.0);
 
+
+    //TODO:优化滑动窗口内的Pose
     for (int i = 0; i < frame_count + 1; i++)
     {
-        // 对于四元数或者旋转矩阵这种使用过参数化表示旋转的方式，它们是不支持广义的加法
+        // 对于四元数或者旋转矩阵这种使用过参数化表示旋转的方式，它们是不支持广义运算，对ceres自动求导带来困难
         // 所以我们在使用ceres对其进行迭代更新的时候就需要自定义其更新方式了，具体的做法是实现一个LocalParameterization
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
 
-        // AddParameterBlock   向该问题添加具有适当大小和参数化的参数块。
+        // AddParameterBlock   向该问题添加具有适当大小和参数化的参数块, SIZE_POSE = 7是因为3（xyz）+ 4(四元数)
         problem.AddParameterBlock(para_Pose[i], SIZE_POSE, local_parameterization); //因为有四元数,所以使用了 local_parameterization
         if(USE_IMU)
             problem.AddParameterBlock(para_SpeedBias[i], SIZE_SPEEDBIAS);//使用默认的加法
     }
 
-    // 没使用imu时,将窗口内第一帧的位姿固定
+    // 没使用imu时,将窗口内第一帧的位姿固定，暂时不需要看
     if(!USE_IMU)
         // SetParameterBlockConstant 在优化过程中，使指示的参数块保持恒定。设置任何参数块变成一个常量
         // 固定第一帧的位姿不变!  这里涉及到论文2中的
         problem.SetParameterBlockConstant(para_Pose[0]);
 
 
+    
+    //TODO: 外参是否需要估计，如果不重要就不管
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         ceres::LocalParameterization *local_parameterization = new PoseLocalParameterization();
@@ -1196,14 +1217,15 @@ void Estimator::optimization()
     if (!ESTIMATE_TD || Vs[0].norm() < 0.2)//如果不估计时间就固定
         problem.SetParameterBlockConstant(para_Td[0]);
 
+    
     // ------------------------在问题中添加约束,也就是构造残差函数---------------------------------- 
-    // 在问题中添加先验信息作为约束
+    // 在问题中添加先验信息作为约束，暂时还没理解
     if (last_marginalization_info && last_marginalization_info->valid)
     {
         // 构造新的marginisation_factor construct new marginlization_factor
         MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
 
-        /* 通过提供参数块的向量来添加残差块。
+        /* 通过提供参数块的向量来添加残差块
         ResidualBlockId AddResidualBlock(
             CostFunction* cost_function,//损失函数
             LossFunction* loss_function,//核函数
@@ -1212,7 +1234,7 @@ void Estimator::optimization()
                                  last_marginalization_parameter_blocks);
     }
 
-    // 在问题中添加IMU约束
+    // 在问题中添加IMU约束，预计分的损失
     if(USE_IMU)
     {
         for (int i = 0; i < frame_count; i++)
@@ -1281,10 +1303,16 @@ void Estimator::optimization()
     ROS_DEBUG("visual measurement count: %d", f_m_cnt);
     //printf("prepare for ceres: %f \n", t_prepare.toc());
 
-    // ------------------------------------写下来配置优化选项,并进行求解-----------------------------------------
+
+
+    //TODO: ------------------------------------写下来配置优化选项,并进行求解-----------------------------------------
     ceres::Solver::Options options;
+
+    //由于Bundle Adjustment的特殊结构，使用DENSE_SCHUR比较合适
     options.linear_solver_type = ceres::DENSE_SCHUR;
     //options.num_threads = 2;
+    
+    //信赖区域方法是一种在数值优化中常用的策略，用于在每次迭代中计算一个合适的步长，使得目标函数在该步长下能够得到更好的优化。
     options.trust_region_strategy_type = ceres::DOGLEG;
     options.max_num_iterations = NUM_ITERATIONS;
     //options.use_explicit_schur_complement = true;
