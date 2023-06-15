@@ -20,6 +20,8 @@
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
 
+#include <Eigen/Core>
+
 #include "parameters.h"
 #include "feature_manager.h"
 #include "../utility/utility.h"

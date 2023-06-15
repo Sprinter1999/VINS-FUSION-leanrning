@@ -967,6 +967,31 @@ para_Feature（1维，特征点深度）、
 para_Td（1维，标定同步时间）
 五部分组成，在后面进行边缘化操作时这些优化变量都是当做整体看待。*/
 
+// #include <Eigen/Core>
+// #include <Eigen/Geometry>
+
+// 将四元数转换为位姿矩阵
+Eigen::Matrix4d poseFromQuaternionAndPosition(const Eigen::Quaterniond& quaternion, const Eigen::Vector3d& position)
+{
+    Eigen::Matrix3d rotationMatrix = quaternion.toRotationMatrix();
+    Eigen::Matrix4d poseMatrix = Eigen::Matrix4d::Identity();
+    poseMatrix.block<3, 3>(0, 0) = rotationMatrix;
+    poseMatrix.block<3, 1>(0, 3) = position;
+    return poseMatrix;
+}
+
+// 示例
+// int main()
+// {
+//     Eigen::Quaterniond quaternion(0.5, 0.5, 0.5, 0.5);
+//     Eigen::Vector3d position(1.0, 2.0, 3.0);
+//     Eigen::Matrix4d poseMatrix = poseFromQuaternionAndPosition(quaternion, position);
+//     std::cout << "Pose matrix:\n" << poseMatrix << std::endl;
+//     return 0;
+// }
+
+
+
 //TODO:后端优化是针对滑动窗口内的Pose和Feature进行联合优化，所以在划窗内的相关变量需要转化为double数组，这里的转化是为了ceres优化库使用
 void Estimator::vector2double()
 {
@@ -976,6 +1001,7 @@ void Estimator::vector2double()
         para_Pose[i][1] = Ps[i].y();
         para_Pose[i][2] = Ps[i].z();
 
+        //*pose
         Quaterniond q{Rs[i]};
         para_Pose[i][3] = q.x();
         para_Pose[i][4] = q.y();
@@ -1219,7 +1245,7 @@ void Estimator::optimization()
 
     
     // ------------------------在问题中添加约束,也就是构造残差函数---------------------------------- 
-    // 在问题中添加先验信息作为约束，暂时还没理解
+    // 在问题中添加先验信息作为约束，暂时还没理解这里的“先验”具体是指什么
     if (last_marginalization_info && last_marginalization_info->valid)
     {
         // 构造新的marginisation_factor construct new marginlization_factor
@@ -1323,6 +1349,8 @@ void Estimator::optimization()
         options.max_solver_time_in_seconds = SOLVER_TIME * 4.0 / 5.0;
     else
         options.max_solver_time_in_seconds = SOLVER_TIME;
+
+
     TicToc t_solver;
     ceres::Solver::Summary summary;//优化信息
     ceres::Solve(options, &problem, &summary);
@@ -1336,6 +1364,7 @@ void Estimator::optimization()
     if(frame_count < WINDOW_SIZE)
         return;
 
+    //TODO: VINS的流程：先优化再进行边缘化
     // -----------------------------marginalization ------------------------------------
     TicToc t_whole_marginalization;
 
@@ -1396,6 +1425,7 @@ void Estimator::optimization()
             for (auto &it_per_id : f_manager.feature)
             {
                 it_per_id.used_num = it_per_id.feature_per_frame.size();
+
                 if (it_per_id.used_num < 4)
                     continue;
 
@@ -1420,6 +1450,7 @@ void Estimator::optimization()
                             vector<int>{0, 3});
                         marginalization_info->addResidualBlockInfo(residual_block_info);
                     }
+                    //TODO: 先不考虑双目
                     if(STEREO && it_per_frame.is_stereo)
                     {
                         Vector3d pts_j_right = it_per_frame.pointRight;

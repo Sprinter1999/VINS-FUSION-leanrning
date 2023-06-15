@@ -42,7 +42,7 @@ int main(int argc, char** argv)
     {
         ceres::CostFunction* cost_function =
             new ceres::AutoDiffCostFunction<QuadraticFunctor, 1, 3>(
-                new QuadraticFunctor(x_data[i], y_data[i]));
+                new QuadraticLSEFunctor(x_data[i], y_data[i],z_data[i]));
         problem.AddResidualBlock(cost_function, NULL, &a, &b, &c);
     }
 

@@ -53,6 +53,9 @@ add_library(vins_lib
     src/featureTracker/feature_tracker.cpp)
 target_link_libraries(vins_lib ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
+catkin_install_python(PROGRAMS vins_estimator/scripts/bev_detect.py
+                     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
 
 add_executable(vins_node src/rosNodeTest.cpp)
 target_link_libraries(vins_node vins_lib) 

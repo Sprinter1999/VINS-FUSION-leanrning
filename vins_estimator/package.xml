@@ -16,6 +16,9 @@
   <license>GPLv3</license>
 
 
+  <build_depend>python-catkin-tools</build_depend> 
+  <exec_depend>python-catkin-tools</exec_depend>
+
   <!-- Url tags are optional, but mutiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
