@@ -971,6 +971,7 @@ para_Td（1维，标定同步时间）
 // #include <Eigen/Geometry>
 
 // 将四元数转换为位姿矩阵
+//test
 Eigen::Matrix4d poseFromQuaternionAndPosition(const Eigen::Quaterniond& quaternion, const Eigen::Vector3d& position)
 {
     Eigen::Matrix3d rotationMatrix = quaternion.toRotationMatrix();
