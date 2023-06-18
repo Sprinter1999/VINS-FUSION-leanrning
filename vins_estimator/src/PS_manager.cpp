@@ -64,7 +64,7 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber sub_;
     std::vector<Spot> ParkingSpots;
-    double threshold_ = 0.5;
+    double threshold_ = 0.5; //判断是否为同一停车位的阈值，需要调整
 };
 
 int main(int argc, char **argv)
