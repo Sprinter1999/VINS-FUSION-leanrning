@@ -61,7 +61,7 @@ private:
         }
 
         template <typename T>
-        bool operator()(const T* const pseudo_gt, T* residual) const
+        bool operator()(const T* const pseudo_gt, T* residual) const  
         {
             for (size_t i = 0; i < observed_values_.size(); i++)
             {
