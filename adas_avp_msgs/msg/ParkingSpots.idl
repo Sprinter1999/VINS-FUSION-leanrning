@@ -1,0 +1,13 @@
+#include "adas_avp_msgs/msg/ParkingSpot.idl"
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/Polygon.idl"
+
+module adas_avp_msgs {
+  module msg {
+    @verbatim(language = "comment",
+              text = "polygon for a parking spot and whether it's free for parking") struct ParkingSpots {
+      std_msgs::msg::Header header;
+      sequence<adas_avp_msgs::msg::ParkingSpot, 100> parking_spots;
+    };
+  };
+};
