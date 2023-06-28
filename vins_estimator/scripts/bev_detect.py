@@ -18,7 +18,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Header
 from sensor_msgs.msg import Image, CameraInfo
-from xauto_msgs.msg import Image as XImage
+from adas_avp_msgs.msg import Image as XImage
 from nav_msgs.msg import Odometry 
 from geometry_msgs.msg import Point32, Polygon, Point, Quaternion
 from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
@@ -29,7 +29,7 @@ import cv2
 import json
 from cv_bridge import CvBridge, CvBridgeError
 
-#FIXME: adas_avp_msgs
+#FIXME: add psdet yolov5 to this folder
 from adas_avp_msgs.msg import ParkingSpots, ParkingSpot
 from psdet.yolov5_vps.models.vps_direction import PsDetect
 from psdet.yolov5_vps.utils.vps_utils import compute_four_points_direction
@@ -37,7 +37,7 @@ import copy
 
 
 
-# 写死的参数
+# fixed parameters
 bev_height = 600
 bev_width = 600
 scale = 53
@@ -71,7 +71,7 @@ def bev_points_to_baselinkfp(pts):
 def to_geometry_point_msg(pt):
     return Point32(x=float(pt[0]), y=float(pt[1]))
 
-def to_area_msg(detection, header):
+def to_area_msg(detection, header, nearest_pose):
     point1 = detection[0]
     point2 = detection[1]
     angle = detection[2]
@@ -82,7 +82,7 @@ def to_area_msg(detection, header):
     pts = bev_points_to_baselinkfp(pts)
 
     #FIXME: retrieve the current pose from the odometry topic
-    cur_odom = Odometry()
+    cur_odom = nearest_pose
     pts_baslinkfp_to_worldfp = [compute_ps_in_worldframe(cur_odom,each) for each in pts]
     # point3_org = copy.copy(pts[2])
     # point4_org = copy.copy(pts[3])
@@ -98,16 +98,29 @@ def to_area_msg(detection, header):
 
 class PSDetNode(Node):
     def __init__(self):
-        super().__init__('psdet_node')
+        super().__init__('psdet_node') # 指定节点名称
         # qos_profile = rclpy.qos.QoSProfile(depth=10)
         # qos_profile.reliability = rclpy.qos.QoSReliabilityPolicy.RELIABLE
         # qos_profile.history = rclpy.qos.QoSHistoryPolicy.KEEP_ALL
         # qos_profile.durability = rclpy.qos.QoSDurabilityPolicy.VOLATILE
+        
+        # 相机频率会比较低
         self.image_sub = self.create_subscription(
             XImage,
             'bev_image',
             self.cb,
-            100)
+            40)
+        
+        self.camera_pose_sub = self.create_subscription(
+            Odometry,
+            'vins_estimator/camera_pose',
+            self.cb2,
+            300)
+        
+        self.observed_camera_pose_list = []
+        self.observed_camera_pose_timestamp_list = []
+            
+
         self.bridge = CvBridge()
         self.last_seq_id = None
 
@@ -119,6 +132,7 @@ class PSDetNode(Node):
         device = self.declare_parameter('device', 'cpu').value
         img_size = 576
         num_class = 13
+
         # device = "cpu"
         self.ps_detect = PsDetect(weights_path_yolo, img_size, device, data=data, half=False, nc=num_class)
         if self.debug:
@@ -131,34 +145,39 @@ class PSDetNode(Node):
         # self.tf_buffer = Buffer()
         # self.tf_listener = TransformListener(self.tf_buffer, self)
 
+
+    def cb2(self, msg):
+        # 接收到新的pose信息，从header中获取时间戳，并将时间戳和pose信息存入对应列表
+        # pose列表主要是缓冲信息，用于后续和bev图像的时间戳进行邻近匹配，进而去计算车位的世界坐标
+        self.observed_camera_pose_list.append(msg.pose.pose)
+        self.observed_camera_pose_timestamp_list.append(msg.header.stamp)
+        # 如果列表中的pose信息数量大于200，则删除最早的一个pose信息，否则要处理的pose信息太多，会导致计算量过大，这个可能需要调一下
+        if len(self.observed_camera_pose_list) > 200:
+            self.observed_camera_pose_list.pop(0)
+            self.observed_camera_pose_timestamp_list.pop(0)
+
+        return
+
+    #TODO: 目前考虑地比较理想，认为一定能找到一个较为合理的邻近值，实际上可能会有bad case
+    def find_nearest_timestamp(self, bev_timestamp):
+        timestamp_list = self.observed_camera_pose_timestamp_list
+        nearest_timestamp = None
+        nearest_index = None
+        min_diff = float('inf')
+
+        for i, timestamp in enumerate(timestamp_list):
+            diff = abs(timestamp - bev_timestamp)
+            if diff < min_diff:
+                min_diff = diff
+                nearest_timestamp = timestamp
+                nearest_index = i
+
+        return nearest_timestamp, nearest_index
+
     def cb(self, msg):
-        # try:
-        #     now = rclpy.time.Time()
-        #     trans = self.tf_buffer.lookup_transform(
-        #         msg.header.frame_id,
-        #         points_msg.header.frame_id,
-        #         now,
-        #         timeout=rclpy.time.Duration(seconds=0.05))
-        #     # import pudb; pu.db
-        #     # trans = self.tf_buffer.lookup_transform_full(
-        #     #     target_frame=image_msg.header.frame_id,
-        #     #     target_time=rclpy.time.Time.from_msg(image_msg.header.stamp),
-        #     #     source_frame=points_msg.header.frame_id,
-        #     #     source_time=rclpy.time.Time.from_msg(points_msg.header.stamp),
-        #     #     fixed_frame='base_link',
-        #     #     timeout=rclpy.time.Duration(seconds=0.05))
-        # except (LookupException, ConnectivityException, ExtrapolationException) as e:
-        #     return
-        #     # raise
-        #     if self.tf_retry_time < self.tf_max_retry_time:
-        #         self.get_logger().info('Transform not ready, try again...')
-        #         self.tf_retry_time += 1
-        #         return
-        #     else:
-        #         self.get_logger().error('Transform error...')
-        #         raise e
         cv_img = self.bridge.imgmsg_to_cv2(msg.base)
         img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+
         seq_id = msg.extend.seq_id
         if self.last_seq_id is None:
             self.last_seq_id = seq_id
@@ -166,46 +185,56 @@ class PSDetNode(Node):
             if self.last_seq_id >= seq_id:
                 return
             self.last_seq_id = seq_id
+
+
         stamp = msg.header.stamp
+
+        # 根据bev图像的时间戳，找到最近的pose信息
+        nearest_timestamp, nearest_index = self.find_nearest_timestamp(stamp)
+        nearest_pose = self.observed_camera_pose_list[nearest_index]
+
         frame_id = msg.header.frame_id
         detections = self.ps_detect.detect_ps(img, self.conf_thres, self.nms_thres)
-        result = self.create_results(detections, msg.header)
-        if self.debug_publisher is not None:
-            if len(detections) != 0:
-                for detection in detections:
-                    point1 = detection[0]
-                    point2 = detection[1]
-                    angle = detection[2]
-                    direction = detection[3]
-                    conf = detection[4]
-                    vacant = detection[5]
+        # Create result 函数会完成车位的世界坐标计算
+        result = self.create_results(detections, msg.header,nearest_pose)
 
-                    pts = compute_four_points_direction(angle, point1, point2, direction)
+        # TODO: psdet的精度大概有多少之后可以找yixiong问一下
+        # if self.debug_publisher is not None:
+        #     if len(detections) != 0:
+        #         for detection in detections:
+        #             point1 = detection[0]
+        #             point2 = detection[1]
+        #             angle = detection[2]
+        #             direction = detection[3]
+        #             conf = detection[4]
+        #             vacant = detection[5]
 
-                    # pts[0] and pts[1] are marking points of the entrance
-                    pts_show = np.array([pts[0], pts[1], pts[2], pts[3]], np.int32)
-                    # vacant = 0 means the slot is empty
+        #             pts = compute_four_points_direction(angle, point1, point2, direction)
+
+        #             # pts[0] and pts[1] are marking points of the entrance
+        #             pts_show = np.array([pts[0], pts[1], pts[2], pts[3]], np.int32)
+        #             # vacant = 0 means the slot is empty
                     
-                    if vacant == 0:
-                        color = (0, 0, 255)#(r,g,b)
-                    else:
-                        color = (255, 0, 0)
+        #             if vacant == 0:
+        #                 color = (0, 0, 255)#(r,g,b)
+        #             else:
+        #                 color = (255, 0, 0)
 
-                    cv2.polylines(cv_img, [pts_show], True, color, 2)
-                    # cv2.imwrite(os.path.join('/home/adas/hanl/xautoproj/tmp', f"{seq_id}.jpg"), img[:,:,::-1])
-            self.debug_publisher.publish(
-                self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
+        #             cv2.polylines(cv_img, [pts_show], True, color, 2)
+        #             # cv2.imwrite(os.path.join('/home/adas/hanl/xautoproj/tmp', f"{seq_id}.jpg"), img[:,:,::-1])
+        #     self.debug_publisher.publish(
+        #         self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8'))
 
         self.publisher.publish(result)
 
-    def create_results(self, detections, header):
+    def create_results(self, detections, header, nearest_pose):
         result = ParkingSpots()
         new_header = Header()
         new_header.stamp = header.stamp
         new_header.frame_id = 'base_link'
         result.header = new_header
         for detection in detections:
-            result.parking_spots.append(to_area_msg(detection, new_header))
+            result.parking_spots.append(to_area_msg(detection, new_header, nearest_pose))
         return result
 
 # 将四元数转换为旋转矩阵
@@ -275,9 +304,3 @@ def main():
 if __name__ == '__main__':
     main()
 
-# 示例
-# if __name__ == '__main__':
-#     quaternion = np.array([0.5, 0.5, 0.5, 0.5])
-#     position = np.array([1.0, 2.0, 3.0])
-#     pose_matrix = pose_from_quaternion_and_position(quaternion, position)
-#     print("Pose matrix:\n", pose_matrix)
