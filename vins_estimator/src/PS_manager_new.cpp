@@ -48,6 +48,7 @@ private:
       for (auto& pseudo_gt_spot : pseudo_gt_)  
       {  
         // 计算IOU并进行匹配判断  
+        //FIXME: 这里成员变量还得想想怎么改
         double iou = computeIOU(pseudo_gt_spot.position, spot.polygon.points);  
         if (iou > 0.5)  // 设定阈值为0.5  
         {  
