@@ -10,7 +10,7 @@
 #include "estimator.h"
 #include "../utility/visualization.h"
 
-//管理特征点的对象
+//管理特征点的对象初始化
 Estimator::Estimator(): f_manager{Rs}
 {
     ROS_INFO("init begins");
@@ -108,7 +108,10 @@ void Estimator::setParameter()
     }
     f_manager.setRic(ric);//将相机参数传入特征点的管理器类中
 
+    //主要看这个
     ProjectionTwoFrameOneCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
+
+
     ProjectionTwoFrameTwoCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
     ProjectionOneFrameTwoCamFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
 
@@ -191,14 +194,15 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
         featureFrame = featureTracker.trackImage(t, _img, _img1);// 追踪双目
     printf("featureTracker time: %f\n", featureTrackerTime.toc());
 
-    if (SHOW_TRACK)//这个应该是展示轨迹 
+    if (SHOW_TRACK)//这个应该是展示轨迹，方便Rviz可视化 
     {
         cv::Mat imgTrack = featureTracker.getTrackImage();
         pubTrackImage(imgTrack, t);
     }
     
-    if(MULTIPLE_THREAD) //线程资源管理，虽然没完全理解，不过也不是最主要的部分
-    {     
+    if(MULTIPLE_THREAD) //是否多线程
+    {    
+        //做了一个降采样，只有偶数帧才会进入
         if(inputImageCnt % 2 == 0)
         {
             mBuf.lock();
@@ -218,8 +222,10 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
     
 }
 
-// 输入一个imu的量测
-// 填充了accBuf和gyrBuf
+// 输入一个imu的量测，填充了accBuf和gyrBuf
+//fastPredictIMU 使用上一时刻的姿态进行快速的imu预积分来预测最新P,V,Q的姿态
+//其中:latest_p, latest_q, latest_v, latest_acc_0, latest_gyr_0 最新时刻的姿态。
+//这个的作用是为了刷新姿态的输出，但是这个值的误差相对会比较大，是未经过非线性优化获取的初始值
 void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vector3d &angularVelocity)
 {
     //顺序读写加入的imu和gyr数据
@@ -233,7 +239,7 @@ void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vec
     if (solver_flag == NON_LINEAR)
     {
         mPropagate.lock();
-        fastPredictIMU(t, linearAcceleration, angularVelocity);
+        fastPredictIMU(t, linearAcceleration, angularVelocity); //仅通过IMU预测最新的P,V,acc_0,gyr_0
         //latest_X是上一个时刻的各个值
         pubLatestOdometry(latest_P, latest_Q, latest_V, t);
         mPropagate.unlock();
@@ -247,12 +253,12 @@ void Estimator::inputFeature(double t, const map<int, vector<pair<int, Eigen::Ma
     featureBuf.push(make_pair(t, featureFrame));
     mBuf.unlock();
 
-    //FIXME:其实这里的MULTIPLE_THREAD我也没搞懂他的主要功能
+    //是否是多线程
     if(!MULTIPLE_THREAD)
         processMeasurements();
 }
 
-// 对imu的时间进行判断，讲队列里的imu数据放入到accVector和gyrVector中，完成之后返回true
+// 对imu的时间进行判断，把Buf缓存队列里的imu数据放入到accVector和gyrVector中，完成之后返回true
 bool Estimator::getIMUInterval(double t0, double t1, vector<pair<double, Eigen::Vector3d>> &accVector, 
                                 vector<pair<double, Eigen::Vector3d>> &gyrVector)
 {
@@ -301,7 +307,7 @@ bool Estimator::IMUAvailable(double t)
         return false;
 }
 
-//FIXME: 处理量测的线程, 没完全理解
+//处理量测的核心函数
 void Estimator::processMeasurements()
 {
     while (1)
@@ -486,6 +492,8 @@ void Estimator::processImage
     ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
 
+
+    //processMeasurements
     ImageFrame imageframe(image, header);
     imageframe.pre_integration = tmp_pre_integration;
     all_image_frame.insert(make_pair(header, imageframe));
@@ -1302,7 +1310,7 @@ void Estimator::optimization()
                     /* 相关介绍:
                     1 只在视觉量测中用了核函数loss_function 用的是huber
                     2 参数包含了para_Pose[imu_i], para_Pose[imu_j], para_Ex_Pose[0], para_Feature[feature_index], para_Td[0]
-                    3 ProjectionTwoFrameOneCamFactor这个重投影并不是很懂 */
+                    3 ProjectionTwoFrameOneCamFactor这个重投影是指最基本的，特征点出现在同一目的不同帧 */
             }
 
             // 如果是双目的

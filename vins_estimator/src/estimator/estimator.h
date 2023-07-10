@@ -48,12 +48,16 @@ class Estimator
 
     // interface 接口
     void initFirstPose(Eigen::Vector3d p, Eigen::Matrix3d r);
+
+    //核心的触发器：inputIMU和inputImage
     void inputIMU(double t, const Vector3d &linearAcceleration, const Vector3d &angularVelocity);
     void inputFeature(double t, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &featureFrame);
     void inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
     void processIMU(double t, double dt, const Vector3d &linear_acceleration, const Vector3d &angular_velocity);
     void processImage(const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, const double header);
+
     void processMeasurements();
+    //中途是可以切换sensor suite的
     void changeSensorType(int use_imu, int use_stereo);
 
     // internal 内部
@@ -61,13 +65,20 @@ class Estimator
     bool initialStructure();
     bool visualInitialAlign();
     bool relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l);
+
+    //优化后，去除外点+预测，根据是否是关键帧，采用不同的滑窗策略，构造先验，最后更新和发布这一轮的结果
     void slideWindow();
     void slideWindowNew();
     void slideWindowOld();
     void optimization();
+
+    //方便Ceres优化器和主程序的变量格式转换
     void vector2double();
     void double2vector();
     bool failureDetection();
+
+    //IMU数据处理过程:如果没有初始化,则初始化IMU位姿
+    //计算IMU量测之间的dt(时间) 调用IMU
     bool getIMUInterval(double t0, double t1, vector<pair<double, Eigen::Vector3d>> &accVector, 
                                               vector<pair<double, Eigen::Vector3d>> &gyrVector);
 
@@ -78,6 +89,8 @@ class Estimator
     //TODO: 这个index是指？
     void getPoseInWorldFrame(int index, Eigen::Matrix4d &T);
     void predictPtsInNextFrame();
+
+    //去除外点
     void outliersRejection(set<int> &removeIndex);
 
     //重投影误差
@@ -97,18 +110,22 @@ class Estimator
         NON_LINEAR // 已成功初始化，正处于紧耦合优化状态
     };
 
+    // 两种边缘化策略
     enum MarginalizationFlag
     {
         MARGIN_OLD = 0,
         MARGIN_SECOND_NEW = 1
     };
 
+    //互斥锁
     std::mutex mProcess;
     std::mutex mBuf;
     std::mutex mPropagate;
+    //IMU数据缓存
     queue<pair<double, Eigen::Vector3d>> accBuf;
     queue<pair<double, Eigen::Vector3d>> gyrBuf;
     queue<pair<double, map<int, vector<pair<int, Eigen::Matrix<double, 7, 1> > > > > > featureBuf;
+
     double prevTime, curTime;//这两个是按照哪个传感器的时间算的？ IMU时间，因为已经通过dt把相机时间转换到了IMU书剑
     bool openExEstimation;
 
@@ -121,12 +138,12 @@ class Estimator
     MarginalizationFlag  marginalization_flag;
     Vector3d g;
 
-    //FIXME:还没理解这两个三维向量是指什么
+    //这两个参数是用来表述Camera-IMU的相对位姿的外参
     Matrix3d ric[2];
     Vector3d tic[2];
 
 
-    //TODO:滑动窗口需要维护哪些信息
+    //TODO:滑动窗口需要维护哪些信息，这里是维护的需要优化信息，后面会通过vector2double和double2vector转换成ceres需要的格式以及换回来
     Vector3d        Ps[(WINDOW_SIZE + 1)];//划窗内所有的p
     Vector3d        Vs[(WINDOW_SIZE + 1)];//划窗内所有的速度
     Matrix3d        Rs[(WINDOW_SIZE + 1)];//划窗内所有的R
@@ -151,7 +168,7 @@ class Estimator
 
 
     //TODO: 车位管理是否也需要进行这种特征点的管理对象？
-    FeatureManager f_manager;//FIXME:定义一个管理特征点的对象
+    FeatureManager f_manager;//定义一个管理特征点的对象
     MotionEstimator m_estimator;//定义一个运动估计的对象
     InitialEXRotation initial_ex_rotation;//定义一个估计外部参数校准的对象
 
@@ -164,7 +181,7 @@ class Estimator
     vector<Vector3d> key_poses;//里边存放关键帧的位姿
     double initial_timestamp;//初始时间戳
 
-
+    //ceres 优化变量
     double para_Pose[WINDOW_SIZE + 1][SIZE_POSE];//11*7,放了划窗内帧的位姿
     double para_SpeedBias[WINDOW_SIZE + 1][SIZE_SPEEDBIAS];
     double para_Feature[NUM_OF_F][SIZE_FEATURE];
@@ -189,5 +206,5 @@ class Estimator
     Eigen::Quaterniond latest_Q;
 
     bool initFirstPoseFlag; //IMU初始位姿的flag
-    bool initThreadFlag;//FIXME: 在哪里进行初始化的?线程是否进行初始化了
+    bool initThreadFlag;//在哪里进行初始化的?线程是否进行初始化了
 };

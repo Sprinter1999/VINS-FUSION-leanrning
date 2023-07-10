@@ -21,7 +21,8 @@
 #include "estimator/parameters.h"
 #include "utility/visualization.h"
 
-Estimator estimator; //申明一个estimator，也就是VIO。自动执行该类的构造函数
+Estimator estimator;    //申明一个estimator，也就是VIO。自动执行该类的构造函数
+
 // queue是队列，插入只允许在尾部进行，检索删除等在头部进行
 queue<sensor_msgs::ImuConstPtr> imu_buf;
 queue<sensor_msgs::PointCloudConstPtr> feature_buf;
@@ -115,7 +116,7 @@ void sync_process()
             if(!image0.empty())
                 estimator.inputImage(time, image0, image1);
         }
-        else //我们考虑单目的情况
+        else //我们主要考虑单目的情况
         {
             cv::Mat image;
             std_msgs::Header header;
@@ -133,7 +134,7 @@ void sync_process()
                 estimator.inputImage(time, image);
         }
 
-        std::chrono::milliseconds dura(2);
+        std::chrono::milliseconds dura(2); //休眠2ms避免cpu占用过高，毕竟有个while(1)
         std::this_thread::sleep_for(dura);
     }
 }
@@ -163,16 +164,17 @@ void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
     // 数据格式为feature_id camera_id xyz_uv_velocity
 
     // 把点云中所有的点
-    // 该特征点在3D世界坐标系中的位置（x, y, z）、在相机坐标系中的归一化像素坐标（p_u, p_v）和在相机坐标系中的速度（velocity_x, velocity_y）
+    // FIXME: 这里repo注释可能写错了:该特征点在3D世界坐标系中的位置（x, y, z）、在相机坐标系中的归一化像素坐标（p_u, p_v）和在相机坐标系中的速度（velocity_x, velocity_y）
     for (unsigned int i = 0; i < feature_msg->points.size(); i++)
     {
+        //feature_id是跟踪时就给出的，直接传递到真正传给后端的feature中
         int feature_id = feature_msg->channels[0].values[i];
         int camera_id = feature_msg->channels[1].values[i];
         //FIXME: 这里的xyz是在什么坐标系下的
         double x = feature_msg->points[i].x;
         double y = feature_msg->points[i].y;
         double z = feature_msg->points[i].z;
-        //FIXME:uv是指？
+        //FIXME:uv是指像素坐标
         double p_u = feature_msg->channels[2].values[i];
         double p_v = feature_msg->channels[3].values[i];
         double velocity_x = feature_msg->channels[4].values[i]; //特征点的像素速度
@@ -266,7 +268,7 @@ int main(int argc, char **argv)
 
     ROS_WARN("waiting for image and imu...");
 
-    registerPub(n);//FIXME:(寄存器register)
+    registerPub(n);//FIXME: 注册发布器，其中pubLatestOdometry是高频的Pose发布器，pubOdometry是低频的Pose发布器
 
     /*
     ros::Subscriber subscribe (const std::string &topic, uint32_t queue_size, void(*fp)(M), const TransportHints &transport_hints=TransportHints())
@@ -278,7 +280,7 @@ int main(int argc, char **argv)
     ros::Subscriber sub_imu = n.subscribe(IMU_TOPIC, 2000, imu_callback, ros::TransportHints().tcpNoDelay());
     ros::Subscriber sub_feature = n.subscribe("/feature_tracker/feature", 2000, feature_callback);
     ros::Subscriber sub_img0 = n.subscribe(IMAGE0_TOPIC, 100, img0_callback);
-    ros::Subscriber sub_img1 = n.subscribe(IMAGE1_TOPIC, 100, img1_callback);
+    ros::Subscriber sub_img1 = n.subscribe(IMAGE1_TOPIC, 100, img1_callback); //可不管
     ros::Subscriber sub_restart = n.subscribe("/vins_restart", 100, restart_callback);
     ros::Subscriber sub_imu_switch = n.subscribe("/vins_imu_switch", 100, imu_switch_callback);
     ros::Subscriber sub_cam_switch = n.subscribe("/vins_cam_switch", 100, cam_switch_callback);
